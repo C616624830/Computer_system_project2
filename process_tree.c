@@ -15,7 +15,7 @@
 typedef struct tree_node{
     unsigned             nr_children;
     char*                name;
-    char**                  children_name;
+    char**               children_name;
     struct tree_node     **children;
 };
 
@@ -130,18 +130,6 @@ void print_tree(struct tree_node* root){
 
 
 
-bool get_file_size(char* filename,size_t *fsize){
-    FILE* fp=fopen(filename, "r");
-    
-    if (fp==NULL){
-        printf("%s: No such file or directory\n",filename);
-        return false;
-    }
-    fseek(fp, 0, SEEK_END);
-    *fsize = ftell(fp);
-    fclose(fp);
-    return true;
-}
 
 void read_entire_file_to_buffer(char* buffer, char* filename, size_t fsize){
     FILE* fp=fopen(filename, "r");
