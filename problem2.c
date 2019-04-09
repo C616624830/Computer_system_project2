@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <fcntl.h>
 #include<string.h>
+#include <signal.h>
 
 /* 
 de-allocate: char** children_name         name_array
@@ -23,7 +24,7 @@ struct tree_node{
     struct tree_node     **children;
 };
 
-void create_process_tree(struct tree_node *root);
+void create_process_tree(struct tree_node *root, int status);
 struct tree_node* create_node(char* Name, int Num, char** children_Name);
 void print_tree_helper(struct tree_node* root, int level);
 void print_tree(struct tree_node* root);
@@ -42,6 +43,7 @@ bool str_equal(char* name1, char* name2);
 char* findname(int row, char*** file);
 int find_childnum(int row, char*** file);
 void find_children_name(int row, char** children_name, int* line_size_array, char*** file, int children_num);
+void explain_wait_status(pid_t pid, int status);
 
 size_t fsize;
 
@@ -50,7 +52,9 @@ size_t fsize;
 
 
 int main(int argc, char* argv[]){
-    
+    int status;
+    pid_t rootpid;
+
     
    if (get_file_size("file",&fsize)==false){
        printf("error");
@@ -67,7 +71,25 @@ int main(int argc, char* argv[]){
 
    print_tree(root);
 
-   create_process_tree(root);
+   rootpid = fork();
+   if(rootpid == 0){
+        printf("HHHHHH0\n");
+
+    create_process_tree(root,status);
+    printf("HHHHHH1\n");
+   }else{
+       // all process are stopped
+       // now starting to continue the root 
+       waitpid(rootpid, &status, WUNTRACED);
+        explain_wait_status(rootpid, status);
+
+            printf("HHHHHH2\n");
+
+       kill(rootpid,SIGCONT);
+    
+    }
+
+
 
    for (int i = 0; i < num_of_lines; i++){
         free(tree_node_arr[i]->name);
@@ -78,20 +100,71 @@ int main(int argc, char* argv[]){
 
 }
 
+// void resume_process_tree(struct tree_node *root,rootpid){
+//     int n = root->children_num;
+//     if (n==0){
+//         return; // PC back to the postion where the function was called
+//     }
 
-void create_process_tree(struct tree_node *root){
+//     printf("The process %s is resuming...\n", root->name);
+//     kill(rootpid,SIGCONT);
+//     printf("The process %s is resumed!!!\n", root->name);
+
+//     for (int i =0; i< n; i++){
+
+//     }
+
+// }
+
+
+void create_process_tree(struct tree_node *root, int status){
     int n = root->children_num;
-    if (n==0){return;}
-    for (int i =0; i<n; i++){
-        pid_t pid = fork();
-        if (pid == 0){
-            create_process_tree(root->children[i]);
-            exit(0);
-        } 
+    pid_t resumePID[n];
+    if (n==0){
+        pid_t leavePid =getpid();
+//the leave node will stop here: 
+        printf("I am a leave child %s\n", root->name);
+        printf("my pid is %d, and my name is %s, Stopping...\n",leavePid, root->name);
+        kill(leavePid,SIGSTOP);
+
+        exit(99);
     }
+
+    pid_t pid; // this is child pid, getting in parent process.
+    pid_t mypid = getpid(); // this is parent pid;
+    pid_t mypid1; // this is child pid, getting inside child process
+
     printf("%s\n", root->name);
-    wait(NULL);
+
+    for (int i =0; i<n; i++){
+        pid = fork();
+        resumePID[i] = pid;
+        if (pid == 0){
+            pid_t mypid1 = getpid();  //get child pid
+            create_process_tree(root->children[i],status);
+            exit(i);// instead of using exit, other nodes stop here:
+        } 
+        waitpid(pid, &status, WUNTRACED);
+        explain_wait_status(pid, status);
+    }
+
+    printf("my pid is %d, and my name is %s, Stopping...\n",mypid, root->name);
+    kill(mypid,SIGSTOP);
+
+    sleep(3);
+    // for each process, we are gonna continue its children...and get exit status of 
+    for (int j=0; j<n; j++){ 
+        printf("Process %d is resuming...\n", resumePID[j]);
+        kill(resumePID[j],SIGCONT);
+        waitpid(pid, &status, WUNTRACED);
+        explain_wait_status(pid, status);
+    }
+
+    printf("Process %s is exiting...\n", root->name);
+    exit(999);
 }
+
+
 
 struct tree_node* create_tree(char* buffer, struct tree_node** tree_node_arr){
 
@@ -375,6 +448,22 @@ void read_entire_file_to_buffer(char* buffer, char* filename, size_t fsize){
     fread(buffer, 1, fsize, fp);
     buffer[fsize] = 0;
     fclose(fp);
+}
+
+void explain_wait_status(pid_t pid, int status){
+    if (WIFEXITED(status)){
+        fprintf(stderr, "Child with PID = %ld terminated normally, exit status = %d\n",(long)pid, WEXITSTATUS(status));
+    }else if (WIFSIGNALED(status)){
+        fprintf(stderr, "Child with PID = %ld was terminated by a signal, exit status: %d\n", (long)pid, WTERMSIG(status));
+    }
+    else if (WIFSTOPPED(status)){
+        fprintf(stderr, "Child with PID = %ld has been stopped by a signal, exit status: %d\n", (long)pid, WSTOPSIG(status));
+    }
+    else{
+        fprintf(stderr, "%s: Internal error: Unhandled case, PID = %ld, Exit code: %d\n", __func__, (long)pid, status);
+        exit(1);
+    }
+    fflush(stderr);
 }
 
 
