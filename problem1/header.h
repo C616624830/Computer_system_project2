@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <fcntl.h>
 #include<string.h>
+#include <sys/wait.h>
 
 /* 
 de-allocate: char** children_name         name_array
@@ -23,7 +24,9 @@ struct tree_node{
     struct tree_node     **children;
 };
 
-void create_process_tree(struct tree_node *root);
+size_t fsize;
+
+void create_process_tree(struct tree_node *root, int level);
 struct tree_node* create_node(char* Name, int Num, char** children_Name);
 void print_tree_helper(struct tree_node* root, int level);
 void print_tree(struct tree_node* root);
@@ -43,53 +46,61 @@ char* findname(int row, char*** file);
 int find_childnum(int row, char*** file);
 void find_children_name(int row, char** children_name, int* line_size_array, char*** file, int children_num);
 
-size_t fsize;
 
+void create_process_tree(struct tree_node *root, int level){
+    /*used for parent to write info to child and child to read info from parent
+    but child is not supposed to have right to write to parent and vice versa
+    */
+    int fd1[2]; 
 
-
-
-
-int main(int argc, char* argv[]){
-    
-    
-   if (get_file_size("file",&fsize)==false){
-       printf("error");
-       return 0;
-   }
-
-   char* buffer = (char*)malloc((fsize + 1)*sizeof(char));
-
-   read_entire_file_to_buffer(buffer, "file", fsize); // this function will read entire file including EOF to the buffer
-
-   int num_of_lines = find_num_of_lines(buffer);
-   struct tree_node* tree_node_arr[num_of_lines]; // used to hold all tree_node pointers
-   struct tree_node* root = create_tree(buffer, tree_node_arr);
-
-   print_tree(root);
-
-   create_process_tree(root);
-
-   for (int i = 0; i < num_of_lines; i++){
-        free(tree_node_arr[i]->name);
-        free(tree_node_arr[i]->children);
-        free(tree_node_arr[i]->children_name); // the name pointer is actaully from the file_line_element
-        free(tree_node_arr[i]);
-   }
-
-}
-
-
-void create_process_tree(struct tree_node *root){
+    /*used for child to write info to parent and parent to read info from child
+    but parent is not supposed to have right to write to child and vice versa
+    */
+    int fd2[2]; 
     int n = root->children_num;
-    if (n==0){return;}
+    int writefd[n];
+    int readfd[n];
+    pid_t pid[n];
+    if (n==0){
+        for (int i = 0; i < level; i++){
+            printf("\t");
+        }
+        printf("%s\n", root->name);
+        return;
+    }
     for (int i =0; i<n; i++){
-        pid_t pid = fork();
-        if (pid == 0){
-            create_process_tree(root->children[i]);
+        pipe(fd1);
+        pipe(fd2);
+        pid[i] = fork();
+        if (pid[i] == 0){
+        	/*child is not supposed to write to parent using pipe1*/
+            close(fd1[1]);
+            /*read message from parent, the message content doesn't matter*/
+            read(fd1[0],&pid[i],sizeof(pid_t));
+            create_process_tree(root->children[i], level+1);
+            /*child is not supposed to read from parent using pipe2*/
+            close(fd2[0]);
+            /*send message to parent, the message content doesn't matter*/
+            write(fd2[1],&pid[i],sizeof(pid_t));
             exit(0);
         } 
+        /*parent is not supposed to read from child using pipe1*/
+        close(fd1[0]);
+        writefd[i] = fd1[1];
+        /*parent is not supposed to write to child using pipe2*/
+        close(fd2[1]);
+        readfd[i] = fd2[0];
+    }
+    for (int i = 0; i < level; i++){
+            printf("\t");
     }
     printf("%s\n", root->name);
+    for (int i = 0; i < n; i++){
+    	/*send message to child[i], the message content doesn't matter*/
+        write(writefd[i], &pid[i], sizeof(pid_t));
+        /*read message from child[i], the message content doesn't matter*/
+        read(readfd[i],&pid[i],sizeof(pid_t));
+    }
     wait(NULL);
 }
 
@@ -376,5 +387,3 @@ void read_entire_file_to_buffer(char* buffer, char* filename, size_t fsize){
     buffer[fsize] = 0;
     fclose(fp);
 }
-
-
